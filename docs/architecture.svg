@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500" viewBox="0 0 1000 500">
+<rect width="1000" height="500" fill="#0f172a"/>
+<text x="500" y="48" text-anchor="middle" font-family="Segoe UI,Microsoft YaHei,sans-serif" font-size="26" fill="#f8fafc">Codex 三条独立连接</text>
+<g font-family="Segoe UI,Microsoft YaHei,sans-serif" font-size="18">
+<rect x="55" y="105" width="240" height="110" rx="14" fill="#1d4ed8"/><text x="175" y="145" text-anchor="middle" fill="white">Edge / Chrome</text><text x="175" y="180" text-anchor="middle" fill="white">Codex 侧边栏</text>
+<rect x="380" y="105" width="240" height="110" rx="14" fill="#047857"/><text x="500" y="145" text-anchor="middle" fill="white">Codex 桌面端</text><text x="500" y="180" text-anchor="middle" fill="white">本机服务与 App Server</text>
+<rect x="705" y="105" width="240" height="110" rx="14" fill="#9333ea"/><text x="825" y="145" text-anchor="middle" fill="white">内置 Browser</text><text x="825" y="180" text-anchor="middle" fill="white">IAB 浏览器通道</text>
+<path d="M295 160 H380" stroke="#94a3b8" stroke-width="4" marker-end="url(#a)"/><path d="M620 160 H705" stroke="#94a3b8" stroke-width="4" marker-end="url(#a)"/>
+<rect x="235" y="310" width="530" height="110" rx="14" fill="#b45309"/><text x="500" y="350" text-anchor="middle" fill="white">Computer Use</text><text x="500" y="385" text-anchor="middle" fill="white">Windows 应用与窗口控制通道</text>
+<path d="M500 215 V310" stroke="#94a3b8" stroke-width="4" marker-end="url(#a)"/>
+</g>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/></marker></defs>
+</svg>
