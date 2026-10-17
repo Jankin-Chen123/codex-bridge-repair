@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $env:PSModulePath = "$PSHOME\Modules;$env:PSModulePath"
@@ -37,12 +37,19 @@ function Test-OfficialDirectory([string]$Source, [string]$Destination) {
     }
     [pscustomobject]@{files=$files;complete=$complete}
 }
+function Move-RepairDirectory([string]$Source, [string]$Destination) {
+    # Directory.Move refuses an occupied destination (Move-Item can nest directories).
+    [IO.Directory]::Move($Source, $Destination)
+}
 function Restore-OfficialDirectory([string]$Source, [string]$Destination, $Inspection) {
-    $files = $Inspection.files
-    if (!$Inspection.complete) {
-        $staging = "$Destination.content-staging-$([guid]::NewGuid().ToString('N'))"
+    if ($Inspection.complete) { return '正常' }
+    $Destination = [IO.Path]::GetFullPath($Destination)
+    $staging = "$Destination.content-staging-$([guid]::NewGuid().ToString('N'))"
+    $backup = "$Destination.backup-$([guid]::NewGuid().ToString('N'))"
+    $backedUp = $false
+    try {
         [IO.Directory]::CreateDirectory($staging) | Out-Null
-        foreach ($file in $files) {
+        foreach ($file in $Inspection.files) {
             $relative = $file.FullName.Substring($Source.Length).TrimStart('\')
             $target = Join-Path $staging $relative
             [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)) | Out-Null
@@ -52,13 +59,28 @@ function Restore-OfficialDirectory([string]$Source, [string]$Destination, $Inspe
         }
         if (Test-Path -LiteralPath $Destination) {
             $resolved = (Resolve-Path -LiteralPath $Destination).Path
-            if ($resolved -ne [IO.Path]::GetFullPath($Destination)) { throw '组件备份路径校验失败。' }
+            if ($resolved -ne $Destination) { throw '组件备份路径校验失败。' }
             if ((Get-Item -LiteralPath $resolved).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '组件目标目录是链接，已停止替换。' }
-            Move-Item -LiteralPath $resolved -Destination "$Destination.backup-$([guid]::NewGuid().ToString('N'))"
+            Move-RepairDirectory $resolved $backup
+            $backedUp = $true
         }
-        Move-Item -LiteralPath $staging -Destination $Destination
+        try {
+            Move-RepairDirectory $staging $Destination
+        } catch {
+            $installError = $_.Exception.Message
+            if ($backedUp) {
+                try { Move-RepairDirectory $backup $Destination }
+                catch { throw "缓存替换失败：$installError；自动回滚失败：$($_.Exception.Message)；旧目录保留于：$backup；目标：$Destination" }
+            }
+            throw "缓存替换失败，原状态已恢复：$installError"
+        }
+    } finally {
+        # Only our unique, absolute staging path may be deleted. Never delete the destination/backup.
+        if ([IO.Directory]::Exists($staging)) {
+            try { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop }
+            catch { [Console]::Error.WriteLine("临时目录清理失败，保留于：$staging；$($_.Exception.Message)") }
+        }
     }
-    if ($Inspection.complete) { return '正常' }
     return '已修复'
 }
 try {
@@ -187,14 +209,54 @@ const pending=destinations.map(p=>{
   }
   return [p,{schemaVersion:2,entries:[...entries,entry]}];
 });
-const backup=path.join(runDirectory,'backups');fs.mkdirSync(backup,{recursive:true});
-for(const p of [manifestPath,...destinations]) if(fs.existsSync(p)) fs.writeFileSync(path.join(backup,path.basename(path.dirname(p))+'-'+path.basename(p)),fs.readFileSync(p));
 const alias=path.join(local,'Microsoft/WindowsApps',family,'codex-chrome-native-host.exe');
 pending.push([manifestPath,{allowed_origins:ids.extensionIds.map(id=>'chrome-extension://'+id+'/'),description:'ChatGPT browser native messaging host',name:hostName,path:alias,type:'stdio'}]);
-for(const [p,value] of pending){
-  fs.mkdirSync(path.dirname(p),{recursive:true});
-  const temp=p+'.tmp-'+crypto.randomUUID();fs.writeFileSync(temp,JSON.stringify(value,null,2)+'\n');fs.renameSync(temp,p);
+function writeConfigurationTransaction(pending, runDirectory) {
+  // A unique backup set avoids collisions between equal basenames and repeated runs.
+  const backup=path.join(runDirectory,'backups',crypto.randomUUID());
+  fs.mkdirSync(backup,{recursive:true});
+  const records=[];
+  const committed=[];
+  try {
+    for (const [index,[p,value]] of pending.entries()) {
+      const original=fs.existsSync(p) ? fs.readFileSync(p) : null;
+      const record={path:p,existed:original!==null,backup:path.join(backup,index+'.bin'),
+        temp:p+'.tmp-'+crypto.randomUUID()};
+      records.push(record);
+      if (original!==null) fs.writeFileSync(record.backup,original,{flag:'wx'});
+      fs.mkdirSync(path.dirname(p),{recursive:true});
+      fs.writeFileSync(record.temp,JSON.stringify(value,null,2)+'\n',{flag:'wx'});
+    }
+    // Persist the mapping before replacing anything; absence is part of the snapshot.
+    fs.writeFileSync(path.join(backup,'index.json'),JSON.stringify(records,null,2)+'\n',{flag:'wx'});
+    for (const record of records) {
+      fs.renameSync(record.temp,record.path);
+      committed.push(record);
+    }
+  } catch (error) {
+    const failures=[];
+    for (const record of committed.reverse()) {
+      try {
+        if (record.existed) {
+          fs.writeFileSync(record.temp,fs.readFileSync(record.backup),{flag:'wx'});
+          fs.renameSync(record.temp,record.path);
+        } else fs.unlinkSync(record.path);
+      } catch (rollbackError) {
+        failures.push(record.path+': '+rollbackError.message);
+      }
+    }
+    throw new Error('Native configuration transaction failed: '+error.message+
+      (failures.length ? '; rollback incomplete: '+failures.join('; ') : '; original files restored')+
+      '; backup: '+backup, {cause:error});
+  } finally {
+    for (const record of records) {
+      try { if(fs.existsSync(record.temp)) fs.unlinkSync(record.temp); }
+      catch (error) { console.error('Temporary file retained: '+record.temp+': '+error.message); }
+    }
+  }
+  return backup;
 }
+const backup=writeConfigurationTransaction(pending,runDirectory);
 console.log('Native configuration updated. Backup: '+backup);
 const edge=ids.browserExtensions?.find(b=>b.browserFamily==='edge');
 const extensionId=edge?.storeExtensionId || ids.extensionIds[0];

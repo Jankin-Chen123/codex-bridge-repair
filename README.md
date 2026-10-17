@@ -92,6 +92,13 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 ## 报告和备份
 
+异常恢复方案、隔离自动化测试和独立 CMD 一致性验证见 [异常恢复与验证](docs/rollback-validation.md)。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Check
+```
+
 报告目录：
 
 ```text

@@ -1,3 +1,4 @@
+﻿param([switch]$Check)
 $ErrorActionPreference = 'Stop'
 $folder = Split-Path -Parent $MyInvocation.MyCommand.Path
 $source = Join-Path $folder 'repair.ps1'
@@ -28,6 +29,15 @@ $header = @(
     '# POWERSHELL_PAYLOAD_START'
 ) -join "`r`n"
 $content = ($header + "`r`n" + $body) -replace "`r?`n", "`r`n"
+if ($Check) {
+    if (!(Test-Path -LiteralPath $target) -or
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($target)) -cne
+        [Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($content))) {
+        throw 'Standalone CMD is stale. Run scripts/build.ps1 to regenerate it.'
+    }
+    [Console]::WriteLine('Standalone CMD exactly matches the current source and loader.')
+    return
+}
 [IO.File]::WriteAllText($target, $content, [Text.UTF8Encoding]::new($false))
 [Console]::WriteLine($target)
 
